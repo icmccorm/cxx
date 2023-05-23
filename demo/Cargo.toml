@@ -9,7 +9,7 @@ publish = false
 repository = "https://github.com/dtolnay/cxx"
 
 [dependencies]
-cxx = "1.0"
+cxx = { path = "../", version = "1.0.94" }
 
 [build-dependencies]
-cxx-build = "1.0"
+cxx-build = { path = "../gen/build", version = "1.0.94" }

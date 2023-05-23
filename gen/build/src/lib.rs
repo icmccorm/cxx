@@ -179,13 +179,7 @@ impl Project {
             TargetDir::Unknown => scratch::path("cxxbridge"),
         };
 
-        Ok(Project {
-            include_prefix,
-            manifest_dir,
-            links_attribute,
-            out_dir,
-            shared_dir,
-        })
+        Ok(Project { include_prefix, manifest_dir, links_attribute, out_dir, shared_dir })
     }
 }
 
@@ -280,47 +274,46 @@ fn make_this_crate(prj: &Project) -> Result<Crate> {
     // crate_dir on the include line so that `#include "path/to/file.rs"` from
     // C++ "magically" works and refers to the API generated from that Rust
     // source file.
-    this_crate.header_dirs.push(HeaderDir {
-        exported: true,
-        path: include_dir,
-    });
+    this_crate.header_dirs.push(HeaderDir { exported: true, path: include_dir });
 
-    this_crate.header_dirs.push(HeaderDir {
-        exported: true,
-        path: crate_dir,
-    });
+    this_crate.header_dirs.push(HeaderDir { exported: true, path: crate_dir });
 
     for exported_dir in &CFG.exported_header_dirs {
-        this_crate.header_dirs.push(HeaderDir {
-            exported: true,
-            path: PathBuf::from(exported_dir),
-        });
+        this_crate
+            .header_dirs
+            .push(HeaderDir { exported: true, path: PathBuf::from(exported_dir) });
     }
 
     let mut header_dirs_index = UnorderedMap::new();
     let mut used_header_links = BTreeSet::new();
     let mut used_header_prefixes = BTreeSet::new();
     for krate in deps::direct_dependencies() {
-        let mut is_link_exported = || match &krate.links {
-            None => false,
-            Some(links_attribute) => CFG.exported_header_links.iter().any(|&exported| {
-                let matches = links_attribute == exported;
-                if matches {
-                    used_header_links.insert(exported);
-                }
-                matches
-            }),
+        let mut is_link_exported = || {
+            match &krate.links {
+                None => false,
+                Some(links_attribute) =>
+                    CFG.exported_header_links.iter().any(|&exported| {
+                        let matches = links_attribute == exported;
+                        if matches {
+                            used_header_links.insert(exported);
+                        }
+                        matches
+                    }),
+            }
         };
 
-        let mut is_prefix_exported = || match &krate.include_prefix {
-            None => false,
-            Some(include_prefix) => CFG.exported_header_prefixes.iter().any(|&exported| {
-                let matches = include_prefix.starts_with(exported);
-                if matches {
-                    used_header_prefixes.insert(exported);
-                }
-                matches
-            }),
+        let mut is_prefix_exported = || {
+            match &krate.include_prefix {
+                None => false,
+                Some(include_prefix) =>
+                    CFG.exported_header_prefixes.iter().any(|&exported| {
+                        let matches = include_prefix.starts_with(exported);
+                        if matches {
+                            used_header_prefixes.insert(exported);
+                        }
+                        matches
+                    }),
+            }
         };
 
         let exported = is_link_exported() || is_prefix_exported();
@@ -330,10 +323,7 @@ fn make_this_crate(prj: &Project) -> Result<Crate> {
             match header_dirs_index.entry(dir.path.clone()) {
                 Entry::Vacant(entry) => {
                     entry.insert(this_crate.header_dirs.len());
-                    this_crate.header_dirs.push(HeaderDir {
-                        exported,
-                        path: dir.path,
-                    });
+                    this_crate.header_dirs.push(HeaderDir { exported, path: dir.path });
                 }
                 Entry::Occupied(entry) => {
                     let index = *entry.get();
@@ -343,10 +333,8 @@ fn make_this_crate(prj: &Project) -> Result<Crate> {
         }
     }
 
-    if let Some(unused) = CFG
-        .exported_header_links
-        .iter()
-        .find(|&exported| !used_header_links.contains(exported))
+    if let Some(unused) =
+        CFG.exported_header_links.iter().find(|&exported| !used_header_links.contains(exported))
     {
         return Err(Error::UnusedExportedLinks(unused));
     }
@@ -408,10 +396,15 @@ fn generate_bridge(prj: &Project, build: &mut Build, rust_source_file: &Path) ->
     let cxxbridge = prj.out_dir.join("cxxbridge");
     let include_dir = cxxbridge.join("include").join(&prj.include_prefix);
     let sources_dir = cxxbridge.join("sources").join(&prj.include_prefix);
+    let csv_dir = cxxbridge.join("csv").join(&prj.include_prefix);
 
     let ref rel_path_h = rel_path.with_appended_extension(".h");
     let ref header_path = include_dir.join(rel_path_h);
     out::write(header_path, &generated.header)?;
+
+    let ref rel_path_csv = rel_path.with_appended_extension(".cxx.csv");
+    let ref csv_path = csv_dir.join(rel_path_csv);
+    out::write(csv_path, &generated.rust_extern_csv)?;
 
     let ref link_path = include_dir.join(rel_path);
     let _ = out::symlink_file(header_path, link_path);

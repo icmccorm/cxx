@@ -17,16 +17,16 @@ pub(super) mod out;
 mod write;
 
 use self::cfg::UnsupportedCfgEvaluator;
+pub(super) use self::error::Error;
 use self::error::{format_err, Result};
 use self::file::File;
 use self::include::Include;
 use crate::syntax::cfg::CfgExpr;
 use crate::syntax::report::Errors;
-use crate::syntax::{self, attrs, Types};
+use crate::syntax::{self, attrs, Api, ExternFn, Pair, Types};
+
 use std::collections::BTreeSet as Set;
 use std::path::Path;
-
-pub(super) use self::error::Error;
 
 /// Options for C++ code generation.
 ///
@@ -79,6 +79,9 @@ pub struct GeneratedCode {
     pub header: Vec<u8>,
     /// The bytes of a C++ implementation file (e.g. .cc, cpp etc.)
     pub implementation: Vec<u8>,
+    /// The bytes of a .csv file mapping 'extern "Rust"' functions and enclosing
+    /// modules to C++ names.
+    pub rust_extern_csv: Vec<u8>,
 }
 
 impl Default for Opt {
@@ -107,11 +110,7 @@ pub(super) fn generate_from_path(path: &Path, opt: &Opt) -> GeneratedCode {
 }
 
 fn read_to_string(path: &Path) -> Result<String> {
-    let bytes = if path == Path::new("-") {
-        fs::read_stdin()
-    } else {
-        fs::read(path)
-    }?;
+    let bytes = if path == Path::new("-") { fs::read_stdin() } else { fs::read(path) }?;
     match String::from_utf8(bytes) {
         Ok(string) => Ok(string),
         Err(err) => Err(Error::Utf8(path.to_owned(), err.utf8_error())),
@@ -137,26 +136,26 @@ pub(super) fn generate(syntax: File, opt: &Opt) -> Result<GeneratedCode> {
     let ref mut apis = Vec::new();
     let ref mut errors = Errors::new();
     let ref mut cfg_errors = Set::new();
+    let mut rust_extern_csv: Vec<u8> = Vec::new();
     for bridge in syntax.modules {
         let mut cfg = CfgExpr::Unconditional;
         attrs::parse(
             errors,
             bridge.attrs,
-            attrs::Parser {
-                cfg: Some(&mut cfg),
-                ignore_unrecognized: true,
-                ..Default::default()
-            },
+            attrs::Parser { cfg: Some(&mut cfg), ignore_unrecognized: true, ..Default::default() },
         );
         if cfg::eval(errors, cfg_errors, opt.cfg_evaluator.as_ref(), &cfg) {
             let ref namespace = bridge.namespace;
             let trusted = bridge.unsafety.is_some();
-            apis.extend(syntax::parse_items(
-                errors,
-                bridge.content,
-                trusted,
-                namespace,
-            ));
+            let parsed_apis = syntax::parse_items(errors, bridge.content, trusted, namespace);
+            for api in parsed_apis.iter() {
+                if let Api::RustFunction(ext) = api {
+                    let row =
+                        format!("{},{},{}\n", bridge.ident, ext.name.rust, ext.name.to_symbol());
+                    rust_extern_csv.extend(row.as_bytes());
+                }
+            }
+            apis.extend(parsed_apis);
         }
     }
 
@@ -181,8 +180,6 @@ pub(super) fn generate(syntax: File, opt: &Opt) -> Result<GeneratedCode> {
     if opt.gen_implementation {
         implementation = write::gen(apis, types, opt, false);
     }
-    Ok(GeneratedCode {
-        header,
-        implementation,
-    })
+
+    Ok(GeneratedCode { header, implementation, rust_extern_csv })
 }
