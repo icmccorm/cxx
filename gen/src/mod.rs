@@ -23,7 +23,7 @@ use self::file::File;
 use self::include::Include;
 use crate::syntax::cfg::CfgExpr;
 use crate::syntax::report::Errors;
-use crate::syntax::{self, attrs, Api, ExternFn, Pair, Types};
+use crate::syntax::{self, attrs, Api, Types};
 
 use std::collections::BTreeSet as Set;
 use std::path::Path;
@@ -103,11 +103,12 @@ pub(super) fn generate_from_path(path: &Path, opt: &Opt) -> GeneratedCode {
         Ok(source) => source,
         Err(err) => format_err(path, "", err),
     };
-    match generate_from_string(&source, opt) {
+    match generate_from_string(&source, opt, Some(path)) {
         Ok(out) => out,
         Err(err) => format_err(path, &source, err),
     }
 }
+
 
 fn read_to_string(path: &Path) -> Result<String> {
     let bytes = if path == Path::new("-") { fs::read_stdin() } else { fs::read(path) }?;
@@ -117,7 +118,7 @@ fn read_to_string(path: &Path) -> Result<String> {
     }
 }
 
-fn generate_from_string(source: &str, opt: &Opt) -> Result<GeneratedCode> {
+fn generate_from_string(source: &str, opt: &Opt, path: Option<&Path>) -> Result<GeneratedCode> {
     let mut source = source;
     if source.starts_with("#!") && !source.starts_with("#![") {
         let shebang_end = source.find('\n').unwrap_or(source.len());
@@ -125,10 +126,10 @@ fn generate_from_string(source: &str, opt: &Opt) -> Result<GeneratedCode> {
     }
     proc_macro2::fallback::force();
     let syntax: File = syn::parse_str(source)?;
-    generate(syntax, opt)
+    generate(syntax, opt, path)
 }
 
-pub(super) fn generate(syntax: File, opt: &Opt) -> Result<GeneratedCode> {
+pub(super) fn generate(syntax: File, opt: &Opt, path: Option<&Path>) -> Result<GeneratedCode> {
     if syntax.modules.is_empty() {
         return Err(Error::NoBridgeMod);
     }
@@ -150,9 +151,11 @@ pub(super) fn generate(syntax: File, opt: &Opt) -> Result<GeneratedCode> {
             let parsed_apis = syntax::parse_items(errors, bridge.content, trusted, namespace);
             for api in parsed_apis.iter() {
                 if let Api::RustFunction(ext) = api {
-                    let row =
-                        format!("{},{},{}\n", bridge.ident, ext.name.rust, ext.name.to_symbol());
-                    rust_extern_csv.extend(row.as_bytes());
+                    if let Some(path) = path {
+                        let row =
+                        format!("{},{},{}\n", path.to_str().unwrap_or(""), ext.name.rust, ext.name.to_symbol());
+                        rust_extern_csv.extend(row.as_bytes());
+                    }
                 }
             }
             apis.extend(parsed_apis);

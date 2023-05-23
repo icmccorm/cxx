@@ -2,6 +2,7 @@ fn main() {
     cxx_build::bridge("src/main.rs")
         .file("src/blobstore.cc")
         .flag_if_supported("-std=c++14")
+        .flag("-emit-llvm")
         .compile("cxxbridge-demo");
 
     println!("cargo:rerun-if-changed=src/main.rs");
